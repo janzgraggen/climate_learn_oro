@@ -3,6 +3,7 @@ from .visualize import (
     visualize_mean_bias,
     visualize_sample,
     rank_histogram,
+    visualize_sphere_at_index_save,
 )
 from .loaders import (
     load_model_module,

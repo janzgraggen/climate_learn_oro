@@ -58,6 +58,8 @@ class LitModule(pl.LightningModule):
 
     def replace_constant(self, y, yhat, out_variables):
         for i in range(yhat.shape[1]):
+            print(yhat.shape)
+            print(yhat.shape[1])
             # if constant replace with ground-truth value
             if out_variables[i] in CONSTANTS:
                 yhat[:, i] = y[:, i]
@@ -71,9 +73,10 @@ class LitModule(pl.LightningModule):
         batch: Tuple[torch.Tensor, torch.Tensor, List[str], List[str]],
         batch_idx: int,
     ) -> torch.Tensor:
+        #print(f"[call]: training_step() in LitModule(plLightningModule), Batch {batch_idx}")
         x, y, in_variables, out_variables = batch
         yhat = self(x).to(device=y.device)
-        yhat = self.replace_constant(y, yhat, out_variables)
+        #yhat = self.replace_constant(y, yhat, out_variables)
         if self.train_target_transform:
             yhat = self.train_target_transform(yhat)
             y = self.train_target_transform(y)
@@ -97,6 +100,7 @@ class LitModule(pl.LightningModule):
         )
         return loss
 
+
     def validation_step(
         self,
         batch: Tuple[torch.Tensor, torch.Tensor, List[str], List[str]],
@@ -119,7 +123,7 @@ class LitModule(pl.LightningModule):
     ):
         x, y, in_variables, out_variables = batch
         yhat = self(x).to(device=y.device)
-        yhat = self.replace_constant(y, yhat, out_variables)
+        #yhat = self.replace_constant(y, yhat, out_variables)
         if stage == "val":
             loss_fns = self.val_loss
             transforms = self.val_target_transforms
@@ -162,7 +166,7 @@ class LitModule(pl.LightningModule):
         x_iter = x
         for _ in range(n_iters):
             yhat_iter = self(x_iter).to(device=x_iter.device)
-            yhat_iter = self.replace_constant(y, yhat_iter, out_variables)
+            #yhat_iter = self.replace_constant(y, yhat_iter, out_variables)
             x_iter = x_iter[:, 1:]
             x_iter = torch.cat((x_iter, yhat_iter.unsqueeze(1)), dim=1)
         yhat = yhat_iter

@@ -181,6 +181,8 @@ class RMSE(Metric):
         """
         if mask is not None:
             return rmse(pred, target, self.aggregate_only, mask)
+        print(f'pred.shape: {pred.shape}, target.shape: {target.shape}')
+        print(self.aggregate_only)
         return rmse(pred, target, self.aggregate_only)
 
 

@@ -76,6 +76,7 @@ def rmse(
     loss = per_channel_losses.mean()
     if aggregate_only:
         return loss
+    print(per_channel_losses.shape, loss.unsqueeze(0).shape)
     return torch.cat((per_channel_losses, loss.unsqueeze(0)))
 
 
