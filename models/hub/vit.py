@@ -563,6 +563,7 @@ class Geo_INR(nn.Module):
         super().__init__()
         eps = 1e-6
         self.far = far
+        self.slim = slim
         if isinstance(oro_path, str):
             oro = np.load(oro_path)['orography']
             oro = (oro - oro.mean()) / (oro.std() + eps)
@@ -579,7 +580,6 @@ class Geo_INR(nn.Module):
             PeriodicConv2D(32, n_sh_coeff, kernel_size=3, padding=1),
         )
         self.siren = SirenNet(dim_in=n_sh_coeff, dim_hidden=siren_hidden, num_layers=2, dim_out=n_sh_coeff)
-        self.projection = PeriodicConv2D(n_sh_coeff*in_channels, conv_start_size, kernel_size=1)
         self.conv = nn.Sequential(
             PeriodicConv2D(conv_start_size, 2*conv_start_size, kernel_size=3, padding=1),
             nn.SiLU(),
@@ -593,8 +593,9 @@ class Geo_INR(nn.Module):
             nn.SiLU(),   # new, remove two layers to reduce computation
             PeriodicConv2D(2*conv_start_size, n_sh_coeff, kernel_size=1, padding=0), # # new, remove (two layers, and the *) to reduce computation
         )
-
-        self.projection_A = PeriodicConv2D(in_channels, n_sh_coeff, kernel_size=1)
+        proj_dim_mltp = in_channels if far else 1
+        self.projection = PeriodicConv2D(n_sh_coeff*proj_dim_mltp, conv_start_size, kernel_size=1)
+        if not far: self.projection_A = PeriodicConv2D(in_channels, n_sh_coeff, kernel_size=1)
         self.n_sh_coeff=n_sh_coeff
         self.in_channels = in_channels
 
@@ -628,7 +629,7 @@ class Geo_INR(nn.Module):
         out = self.conv(fused)
         
         return out  # [B, 1, H, W]
-
+'''
 class Geo_INR_v2(nn.Module):
     def __init__(
             self,
@@ -667,7 +668,7 @@ class Geo_INR_v2(nn.Module):
         self.in_channels = in_channels
 
     def forward(self, A):  # [B, n, H, W]
-        print(f"A shape in Geo_INR_v2: {A.shape}") 
+        print(f"A shape in Geo_INR_v2: {A.shape}") # torch.Size([16, 192, 534, 534])
         B, _, H, W = A.size() 
         C = self.in_channels
         loc_basis = self.basis.view(-1, self.n_sh_coeff, H, W) # [1, 64, H, W]
@@ -689,12 +690,11 @@ class Geo_INR_v2(nn.Module):
         geo_basis = geo_basis.permute(0, 3, 1, 2) # [B, n_sh, H, W]
         multi_geo_basis = geo_basis.repeat(1, C, 1, 1)
         
-        fused = multi_geo_basis * A + multi_geo_basis
+        fused = multi_geo_basis * A + multi_geo_basis #A: torch.Size([16, 192, 534, 534])
         fused = self.projection(fused)
         out = self.conv(fused)
         
         return out  # [B, 1, H, W]
-
 class GeoNoFAR_INR(nn.Module):
     def __init__(
             self,
@@ -723,18 +723,16 @@ class GeoNoFAR_INR(nn.Module):
             PeriodicConv2D(32, n_sh_coeff, kernel_size=3, padding=1),
         )
         self.siren = SirenNet(dim_in=n_sh_coeff, dim_hidden=siren_hidden, num_layers=2, dim_out=n_sh_coeff)
-        self.projection = PeriodicConv2D(n_sh_coeff, conv_start_size, kernel_size=1)
         self.conv = nn.Sequential(
             PeriodicConv2D(conv_start_size, 2*conv_start_size, kernel_size=3, padding=1),
             nn.SiLU(),   # new, remove two layers to reduce computation
             PeriodicConv2D(2*conv_start_size, n_sh_coeff, kernel_size=1, padding=0), # # new, remove (two layers, and the *) to reduce computation
         )
+        self.projection = PeriodicConv2D(n_sh_coeff, conv_start_size, kernel_size=1)
         self.projection_A = PeriodicConv2D(in_channels, n_sh_coeff, kernel_size=1)
         self.n_sh_coeff = n_sh_coeff
         self.in_channels = in_channels
-    def forward(self, A):  # [B, C, H, W]
-        #A = A.squeeze(2)  # [B, C, H, W] = [16, 3,534,534]
-        print(f"A shape in GeoNoFAR_INR: {A.shape}") 
+    def forward(self, A):  # [B, C, H, W] 
         B, _,_, H, W = A.size()
         C = self.in_channels
         loc_basis = self.basis.view(-1, self.n_sh_coeff, H, W) # [1, 64, H, W]
@@ -755,11 +753,18 @@ class GeoNoFAR_INR(nn.Module):
         geo_basis = self.siren(geo_basis.permute(0,2,3,1))#.view(self.n_sh_coeff, H, W)
         geo_basis = geo_basis.permute(0, 3, 1, 2) # [B, n_sh, H, W]
         #multi_geo_basis = geo_basis.repeat(1,C , 1, 1)
+        print(f"A shape in GeoNoFAR_INR: {A.shape}")
+        A = A.squeeze(2)  # [B, C, H, W] = [16, 3,534,534]
+        print(f"A shape  after squeeze: {A.shape}")
         A = self.projection_A(A)
+        print(f"A shape  after projection {A.shape}")
+        
+        
         fused = geo_basis * A + geo_basis
         fused = self.projection(fused)
         out = self.conv(fused)
         return out  # [B, 1, H, W]
+'''
 
 
 
@@ -851,13 +856,15 @@ class GeoFAR_v2(nn.Module):
         n_basis = int(math.sqrt(n_coeff))
         self.freqconv = LocalDCTConv(n=n_basis, k=8, in_channels=in_channels*history)
         self.basis = spherical_harmonic_basis(H, W, int(n_sh_coeff**0.5)) #.view(n_sh_coeff, H, W)
-        self.encoder = Geo_INR_v2(
+        self.encoder = Geo_INR(
             n_sh_coeff, 
             self.basis, 
             oro_path=oro_path, 
             in_channels=in_channels*history,
             siren_hidden=siren_hidden,
-            conv_start_size=conv_start_size
+            conv_start_size=conv_start_size,
+            slim=True,
+            far=True
         ) 
         self.mapper_vit = Mapper_Vit(
             img_size=img_size, 
@@ -877,17 +884,17 @@ class GeoFAR_v2(nn.Module):
         )
 
     def forward(self, I):  # I: [B, channels, h, w]
-        print(f'I.shape: {I.shape}') # torch.Size([16, 3, 1, 534, 534])
+        #print(f'I.shape: {I.shape}') # torch.Size([16, 3, 1, 534, 534])
         I_last = I[:, -1, :, :]#.unsqueeze(1) # new
-        print(f'I_last.shape: {I_last.shape}') #  torch.Size([16, 1, 1, 534, 534])
+        #print(f'I_last.shape: {I_last.shape}') #  torch.Size([16, 1, 1, 534, 534])
         I_freq = self.freqconv(I) # [B, history*n^2, H, W]
-        print(f'I_freq.shape: after freqconv {I_freq.shape}') ## torch.Size([16, 192, 534, 534])
+        #print(f'I_freq.shape: after freqconv {I_freq.shape}') ## torch.Size([16, 192, 534, 534])
         I_freq = self.encoder(I_freq) # [B, n, H, W]
-        print(f'I_freq.shape: after encoder {I_freq.shape}') #torch.Size([16, 64, 534, 534])
+        #print(f'I_freq.shape: after encoder {I_freq.shape}') #torch.Size([16, 64, 534, 534])
         I_prime = self.mapper_vit(I_freq)
-        print(f'I_prime.shape: after mapping {I_prime.shape}') # torch.Size([16, 1, 534, 534])
+        #print(f'I_prime.shape: after mapping {I_prime.shape}') # torch.Size([16, 1, 534, 534])
         I = I_prime + I_last # new
-        print(f'I.shape: after mapping {I.shape}') # torch.Size([16, 16, 1, 534, 534])
+        #print(f'I.shape: after mapping {I.shape}') # torch.Size([16, 16, 1, 534, 534])
         return I
  
 @register("geonofar")
@@ -917,13 +924,15 @@ class GeoNoFAR(nn.Module):
         n_basis = int(math.sqrt(n_coeff))
         #self.freqconv = LocalDCTConv(n=n_basis, k=8, in_channels=in_channels*history)
         self.basis = spherical_harmonic_basis(H, W, int(n_sh_coeff**0.5)) #.view(n_sh_coeff, H, W)
-        self.encoder = GeoNoFAR_INR(
+        self.encoder = Geo_INR(
             n_sh_coeff,
             self.basis,
             oro_path=oro_path,
             in_channels=in_channels*history,
             siren_hidden=siren_hidden,
-            conv_start_size=conv_start_size
+            conv_start_size=conv_start_size,
+            slim=True,
+            far=False
         )
         self.mapper_vit = Mapper_Vit(
             img_size=img_size,
@@ -942,14 +951,15 @@ class GeoNoFAR(nn.Module):
             history_mltpl=False,
         )
     def forward(self, I):  # I: [B, c, h, w]
-        print(f'I.shape: {I.shape}') #torch.Size([16, 3, 1, 534, 534])
+        #print(f'I.shape: {I.shape}') #torch.Size([16, 3, 1, 534, 534])
         I_last = I[:, -1, :, :] #.unsqueeze(1) # new
-        print(f'I_last.shape: {I_last.shape}') #torch.Size([16, 1, 534, 534])
-        #I_freq = self.freqconv(I) # [B, history*n^2, H, W]
-        I_freq = self.encoder(I) # [B, n^2, H, W]
-        print(f'I_freq.shape: after encoder {I_freq.shape}')
+        #print(f'I_last.shape: {I_last.shape}') #torch.Size([16, 1, 534, 534])
+        I_freq = I.squeeze(2)
+        #print(f'I_freq.shape: {I_freq.shape}') #torch.Size([16, 3, 534, 534])
+        I_freq = self.encoder(I_freq) # [B, n^2, H, W]
+        #print(f'I_freq.shape: after encoder {I_freq.shape}')
         I_prime = self.mapper_vit(I_freq)
-        print(f'I_prime.shape: after mapping {I_prime.shape}')
+        #print(f'I_prime.shape: after mapping {I_prime.shape}')
         I = I_prime + I_last # new
-        print(f'I.shape: after mapping {I.shape}')
+        #print(f'I.shape: after mapping {I.shape}')
         return I 
