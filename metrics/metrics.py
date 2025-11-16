@@ -355,3 +355,76 @@ class MeanBias(Metric):
         :rtype: torch.FloatTensor|torch.DoubleTensor
         """
         return mean_bias(pred, target, self.aggregate_only)
+
+
+# -------------------------
+oro_path = "dataset/CERRA-534/orography.npz"
+oro = np.load(oro_path)["orography"]
+oro = np.squeeze(oro).astype(np.float32)
+H = torch.tensor(oro)  # shape (534, 534)
+
+# -------------------------
+# Differentiable helper functions
+def softabs(x, eps=1e-6):
+    return torch.sqrt(x**2 + eps)
+
+def f(dH):
+    """Linear expected topological change"""
+    return 0.0005816 * dH + 0.01518
+
+def weight(dH):
+    """Sigmoid weight: 0 for small dH, ~1 at dH ~ 130"""
+    return torch.sigmoid((dH - 130) / 20.0)  # adjust slope if needed
+
+def empirical_oro_loss(T, H, use_weight=True):
+    """
+    T: predictions, shape (B, H, W)
+    H: reference map, shape (H, W)
+    """
+    B, _, _ = T.shape
+
+    # Make H batched
+    H_batch = H.unsqueeze(0).expand(B, -1, -1)  # (B, H, W)
+
+    # Horizontal and vertical differences
+    dT_x = torch.abs(T[:, :, 1:] - T[:, :, :-1])
+    dT_y = torch.abs(T[:, 1:, :] - T[:, :-1, :])
+    dT = torch.cat([dT_x.reshape(B, -1), dT_y.reshape(B, -1)], dim=1)
+
+    dH_x = torch.abs(H_batch[:, :, 1:] - H_batch[:, :, :-1])
+    dH_y = torch.abs(H_batch[:, 1:, :] - H_batch[:, :-1, :])
+    dH = torch.cat([dH_x.reshape(B, -1), dH_y.reshape(B, -1)], dim=1)
+
+    deltaT_soft = softabs(dT)
+    f_val = f(dH)
+
+    w = weight(dH) if use_weight else 1.0
+    print(deltaT_soft.shape, f_val.shape, w.shape)
+    loss = w * (deltaT_soft - f_val) ** 2
+    return loss.mean()
+
+@register("mse_oro")
+class MSE_ORO(Metric):
+    """Computes standard mean-squared error."""
+
+    def __call__(
+        self,
+        pred: Union[torch.FloatTensor, torch.DoubleTensor],
+        target: Union[torch.FloatTensor, torch.DoubleTensor],
+    ) -> Union[torch.FloatTensor, torch.DoubleTensor]:
+        r"""
+        .. highlight:: python
+
+        :param pred: The predicted values of shape [B,C,H,W].
+        :type pred: torch.FloatTensor|torch.DoubleTensor
+        :param target: The ground truth target values of shape [B,C,H,W].
+        :type target: torch.FloatTensor|torch.DoubleTensor
+
+        :return: A singleton tensor if `self.aggregate_only` is `True`. Else, a
+            tensor of shape [C+1], where the last element is the aggregate
+            MSE, and the preceding elements are the channel-wise MSEs.
+        :rtype: torch.FloatTensor|torch.DoubleTensor
+        """
+        mse_loss = mse(pred, target, self.aggregate_only)
+        oro_loss = empirical_oro_loss(pred.squeeze(), H.to(device=pred.device))
+        return mse_loss + 0.5 * oro_loss  # lambda_topo = 0.1
