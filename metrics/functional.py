@@ -7,6 +7,7 @@ from .utils import Pred, handles_probabilistic
 # Third party
 import torch
 import torch.nn.functional as F
+import warnings
 
 
 @handles_probabilistic
@@ -19,7 +20,15 @@ def mse(
     error = (pred - target).square()
     if lat_weights is not None:
         error = error * lat_weights
-    per_channel_losses = error.mean([0, 2, 3])
+    if error.dim() == 4:
+        per_channel_losses = error.mean([0, 2, 3]) # (B, C, H, W) -> (C,)
+    else:
+        ### ADD WARNING FLAG:
+        if not hasattr(mse, "_warned"):
+            warnings.warn(f"⚠ Warning: error has {error.dim()} dimensions ({error.shape}), expected 4 (B, C, H, W). Assume no C-dim , use aggregate only.")
+            mse._warned = True
+        aggregate_only = True
+        per_channel_losses = torch.tensor([])  # No per-channel losses
     loss = error.mean()
     if aggregate_only:
         return loss
