@@ -1,20 +1,22 @@
 # Standard Library
-from typing import Callable, Optional, Union
+from typing import Callable, Optional, Union, Iterable, Dict, Any, Literal
 
 # Local application
-from .utils import MetricsMetaInfo, register
+from .utils import MetricsMetaInfo, register, register_lagg, LAGG_REGISTRY
 from .functional import *
 
 # Third party
 import numpy as np
 import torch
 
+from ..models.hub.sidm import dH_to_dT_conv
+
 
 class Metric:
     """Parent class for all ClimateLearn metrics."""
 
     def __init__(
-        self, aggregate_only: bool = False, metainfo: Optional[MetricsMetaInfo] = None
+        self, aggregate_only: bool = False, metainfo: Optional[MetricsMetaInfo] = None, loss_kwargs: Optional[Dict[str, Any]] = None,
     ):
         r"""
         .. highlight:: python
@@ -28,6 +30,7 @@ class Metric:
         """
         self.aggregate_only = aggregate_only
         self.metainfo = metainfo
+        self.loss_kwargs = loss_kwargs
 
     def __call__(self, pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
         """
@@ -357,51 +360,109 @@ class MeanBias(Metric):
         return mean_bias(pred, target, self.aggregate_only)
 
 
-# -------------------------
+## LOAD H (Static) –––––––––––––––––––––––––––––––––––––––––––––––––––––––––––
 oro_path = "dataset/CERRA-534/orography.npz"
 oro = np.load(oro_path)["orography"]
 oro = np.squeeze(oro).astype(np.float32)
-H = torch.tensor(oro)  # shape (534, 534)
+H = torch.tensor(oro).to("cuda")  # shape (1,534, 534)
 
-# -------------------------
-# Differentiable helper functions
-def softabs(x, eps=1e-6):
-    return torch.sqrt(x**2 + eps)
+#load model: dH_to_dT_conv as dH_to_dT_conv_MODEL (Static) –––––––––––––––––––
+modelpath= "outputs/SIDM_models/SIDM_convolution_based/dH_to_dT_conv.pt"
+DH_TO_DT_CONV = dH_to_dT_conv().cuda()
+checkpoint = torch.load(modelpath)
+DH_TO_DT_CONV.load_state_dict(checkpoint)
+DH_TO_DT_CONV.eval()
 
-def f(dH):
+def SIDM_empirical_linear(dH):
     """Linear expected topological change"""
     return 0.0005816 * dH + 0.01518
 
-def weight(dH):
-    """Sigmoid weight: 0 for small dH, ~1 at dH ~ 130"""
-    return torch.sigmoid((dH - 130) / 20.0)  # adjust slope if needed
+def SIDM_learned_conv(dH):
+    return(DH_TO_DT_CONV(dH))
 
-def empirical_oro_loss(T, H, use_weight=True):
+def DISA_abs_horizontal_vertical_differences(M, output: Literal["tuple", "flat", "concat"]= "tuple",soft = False):
+    """Compute horizontal and vertical absolute differences of map M.
+    input:
+        M: shape (B, H, W)
+    Returns: 
+     if flat: 
+        dM of shape (B, 2*H*W -H -W) i.e. 
+     if concat:
+        dM of shape (B, 2, H, W)
+     if tuple:
+        dM_x of shape (B, H, W-1), dM_y of shape (B, H-1, W)
+    """
+
+    def softabs(x, eps=1e-6):
+        return torch.sqrt(x**2 + eps)
+    B, H, W = M.shape
+    dM_x = (M[:, :, 1:] - M[:, :, :-1])  # shape (B, H, W-1)
+    dM_y = (M[:, 1:, :] - M[:, :-1, :])  # shape (B, H-1, W)
+    if output == "flat":
+        flat = torch.cat([dM_x.reshape(B, -1), dM_y.reshape(B, -1)], dim=1) # shape (B, 2*H*W - H - W)
+        print(flat.shape)
+        if soft:
+            return softabs(flat).cuda()
+        else:
+            return torch.abs(flat).cuda()
+    if output == "concat":
+        dMx_pad = torch.nn.functional.pad(dM_x, (1,0), mode='replicate') #(B,H,W-1+1)
+        dMy_pad = torch.nn.functional.pad(dM_y.unsqueeze(0), (0, 0, 1, 0), mode='replicate').squeeze(0) # (B,H-1+1,W)
+        pad_concat = torch.stack([dMx_pad, dMy_pad], dim=1).float() # (B,2,H,W)
+        if soft:
+            return softabs(pad_concat).cuda()
+        else:
+            return torch.abs(pad_concat).cuda()
+    if output == "tuple":
+        if soft:
+            return softabs(dM_x).cuda(), softabs(dM_y).cuda()
+        else:
+            return torch.abs(dM_x).cuda(), torch.abs(dM_y).cuda()
+
+@register_lagg("empirical_linear")
+def LAGG_empirical_linear(T):
     """
     T: predictions, shape (B, H, W)
-    H: reference map, shape (H, W)
+
+    calculates the LAGG using 
+        SIDM: empirical_linear
+        DISA: abs horizontal and vertical differences, flat: (B,H,W)-> (B,2*H*W)
+        weighting: sigmoid weight based on dH (sigmoid to adapt to linear regime of the empirical relation)
     """
+
+    def _w(dH):
+        """Sigmoid weight: 0 for small dH, ~1 at dH ~ 130"""
+        return torch.sigmoid((dH - 130) / 20.0)  # adjust slope if needed
+
     B, _, _ = T.shape
 
     # Make H batched
     H_batch = H.unsqueeze(0).expand(B, -1, -1)  # (B, H, W)
 
     # Horizontal and vertical differences
-    dT_x = torch.abs(T[:, :, 1:] - T[:, :, :-1])
-    dT_y = torch.abs(T[:, 1:, :] - T[:, :-1, :])
-    dT = torch.cat([dT_x.reshape(B, -1), dT_y.reshape(B, -1)], dim=1)
+    dT = DISA_abs_horizontal_vertical_differences(T, output="flat",soft=True).cuda()
+    dH = DISA_abs_horizontal_vertical_differences(H_batch, output="flat",soft=False).cuda()
 
-    dH_x = torch.abs(H_batch[:, :, 1:] - H_batch[:, :, :-1])
-    dH_y = torch.abs(H_batch[:, 1:, :] - H_batch[:, :-1, :])
-    dH = torch.cat([dH_x.reshape(B, -1), dH_y.reshape(B, -1)], dim=1)
+    return mse(dT, SIDM_empirical_linear(dH), lat_weights=_w(dH),aggregate_only=True) 
+   
+@register_lagg("conv")
+def LAGG_conv(T): 
+    """
+    T: predictions, shape (B, H, W)
 
-    deltaT_soft = softabs(dT)
-    f_val = f(dH)
+    calculates the LAGG using 
+        SIDM: dH_to_dT_conv
+        DISA: abs horizontal and vertical differences, concatenated: (B,H,W)-> (B,2,H,W)
+        weighting: none 
+    """
+    # compute dH
+    B, _, _ = T.shape
+    H_batch = H.unsqueeze(0).expand(B, -1, -1)  # (B, H, W)
+    
+    dH_stack = DISA_abs_horizontal_vertical_differences(H_batch, output="concat",soft=False).cuda()
+    dT_stack = DISA_abs_horizontal_vertical_differences(T, output="concat",soft=True).cuda()
 
-    w = weight(dH) if use_weight else 1.0
-    print(deltaT_soft.shape, f_val.shape, w.shape)
-    loss = w * (deltaT_soft - f_val) ** 2
-    return loss.mean()
+    return  mse(dT_stack, SIDM_learned_conv(dH_stack), aggregate_only=True)
 
 @register("mse_oro")
 class MSE_ORO(Metric):
@@ -425,6 +486,15 @@ class MSE_ORO(Metric):
             MSE, and the preceding elements are the channel-wise MSEs.
         :rtype: torch.FloatTensor|torch.DoubleTensor
         """
+        if self.loss_kwargs.get("lambda_oro") is None:
+            raise ValueError("lambda_oro must be provided for MSE_ORO metric.\n give lambda_oro as loss_kwargs parameter when loading the loss.")
+        else :
+            lambda_oro = self.loss_kwargs["lambda_oro"]
+
+        if self.loss_kwargs.get("lagg") is None or self.loss_kwargs["lagg"] not in LAGG_REGISTRY.keys():
+            raise ValueError(f"lagg must be (correctly) provided for MSE_ORO metric. Choose from {list(LAGG_REGISTRY.keys())}.\n info: Give lagg as loss_kwargs parameter when loading the loss.")
+        else: 
+            LAGG_fn = LAGG_REGISTRY[self.loss_kwargs["lagg"]]
         mse_loss = mse(pred, target, self.aggregate_only)
-        oro_loss = empirical_oro_loss(pred.squeeze(), H.to(device=pred.device))
-        return mse_loss + 0.5 * oro_loss  # lambda_topo = 0.1
+        oro_loss = LAGG_fn(pred.squeeze())
+        return mse_loss + lambda_oro * oro_loss  # lambda_oro = 0.1s
