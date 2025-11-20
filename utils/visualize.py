@@ -531,6 +531,7 @@ def visualize_sample_save_sphere_cerra(img, out_path, land_mask, extent, index, 
     plt.tight_layout(rect=[0, 0.03, 1, 1])
     plt.savefig(save_path, dpi=300, bbox_inches="tight")
     plt.close(fig)
+    print(f"Saved figure to {save_path}")
     return save_path
 
 
