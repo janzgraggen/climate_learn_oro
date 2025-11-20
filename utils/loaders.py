@@ -41,6 +41,7 @@ def load_model_module(
     train_target_transform: Optional[Union[str, Callable]] = None,
     val_target_transform: Optional[Iterable[Union[str, Callable]]] = None,
     test_target_transform: Optional[Iterable[Union[str, Callable]]] = None,
+    loss_kwargs: Optional[Dict[str, Any]] = None,
 ):
     # Temporary fix, per this discussion:
     # https://github.com/aditya-grover/climate-learn/pull/100#discussion_r1192812343
@@ -104,7 +105,7 @@ def load_model_module(
         print(f"Loading training loss: {train_loss}")
         clim = get_climatology(data_module, "train")
         metainfo = MetricsMetaInfo(in_vars, out_vars, lat, lon, clim)
-        train_loss = load_loss(train_loss, True, metainfo)
+        train_loss = load_loss(train_loss, True, metainfo, loss_kwargs=loss_kwargs)
     elif isinstance(train_loss, Callable):
         print("Using custom training loss")
     else:
@@ -400,7 +401,7 @@ def load_lr_scheduler(
     return lr_scheduler
 
 
-def load_loss(loss_name, aggregate_only, metainfo):
+def load_loss(loss_name, aggregate_only, metainfo, loss_kwargs: Optional[Dict[str, Any]] = None):
     loss_cls = METRICS_REGISTRY.get(loss_name, None)
     if loss_cls is None:
         raise NotImplementedError(
@@ -408,7 +409,10 @@ def load_loss(loss_name, aggregate_only, metainfo):
             " please raise an issue at"
             " https://gtihub.com/aditya-grover/climate-learn/issues"
         )
-    loss = loss_cls(aggregate_only=aggregate_only, metainfo=metainfo)
+    if loss_kwargs:
+        loss = loss_cls(aggregate_only=aggregate_only, metainfo=metainfo, loss_kwargs=loss_kwargs)
+    else:
+        loss = loss_cls(aggregate_only=aggregate_only, metainfo=metainfo)
     return loss
 
 
