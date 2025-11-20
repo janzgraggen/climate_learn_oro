@@ -14,6 +14,7 @@ from cartopy.util import add_cyclic_point
 import os
 from matplotlib import colors
 from scipy.interpolate import griddata
+import glob
 
 def visualize_at_index(mm, dm, in_transform, out_transform, variable, src, index=0):
     lat, lon = dm.get_lat_lon()
