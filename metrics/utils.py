@@ -39,3 +39,12 @@ def handles_probabilistic(metric):
         return metric(pred, *args, **kwargs)
 
     return wrapper
+
+
+LAGG_REGISTRY = {}
+
+def register_lagg(name):
+    def decorator_lagg(fn):
+        LAGG_REGISTRY[name] = fn
+        return fn
+    return decorator_lagg
