@@ -8,14 +8,14 @@ class dH_to_dT_conv(nn.Module):
     """ 
     learn cat(dT/dx, dT/dy) from cat(dH/dx, dH/dy) using simple conv net
     """
-    def __init__(self, in_channels=2, out_channels=2, conv_start_size=32):
+    def __init__(self, in_channels=2, out_channels=2, conv_start_size=16):
         super().__init__()
         self.net = nn.Sequential(
             nn.Conv2d(in_channels, conv_start_size, kernel_size=3, padding=1),  # local receptive field
             nn.ReLU(),
-            nn.Conv2d(conv_start_size, 2*conv_start_size, kernel_size=3, padding=1),  # hidden layer
-            nn.ReLU(),
-            nn.Conv2d(2*conv_start_size, out_channels, kernel_size=3, padding=1)  # outputs 2 channels
+            #nn.Conv2d(conv_start_size, 2*conv_start_size, kernel_size=3, padding=1),  # hidden layer
+            #nn.ReLU(),
+            nn.Conv2d(conv_start_size, out_channels, kernel_size=3, padding=1)  # outputs 2 channels
         )
 
     def forward(self, x):
