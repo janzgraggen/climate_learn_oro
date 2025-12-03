@@ -30,14 +30,14 @@ class dH_to_dT_conv_PE(nn.Module):
                 in_channels=2, 
                 out_channels=2,
                 n_sh_coeff = 36,
-                conv_start_size=32, ## <--- embed arch param
+                conv_start_size=64, ## <--- embed arch param
                 conv_start_size_enc=64, ## <--- embed arch param
                 siren_hidden=128, ## <--- embed arch param
                 oro_path=None,
         ):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Conv2d(in_channels, conv_start_size, kernel_size=3, padding=1),  # local receptive field
+            nn.Conv2d(n_sh_coeff, conv_start_size, kernel_size=3, padding=1),  # local receptive field -> now gets n_sh_coeff channels form the encoding. 
             nn.ReLU(),
             nn.Conv2d(conv_start_size, 2*conv_start_size, kernel_size=3, padding=1),  # hidden layer
             nn.ReLU(),
@@ -59,7 +59,9 @@ class dH_to_dT_conv_PE(nn.Module):
         )
 
     def forward(self, x):
+        #print(x.shape) # [1, 2, H, W]
         x_enc = self.encoder(x)
+        #print( x_enc.shape) # [1, 36, H, W]
         return self.net(x_enc)
     
 
