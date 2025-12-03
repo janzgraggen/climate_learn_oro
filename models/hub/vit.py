@@ -636,8 +636,7 @@ class VitGINR(nn.Module):
             in_channels,
             out_channels,
             history,
-            n_coeff=36,  ## <--- GEO PARAM for LocalDCTConvs
-            n_sh_coeff=36,  ## <--- GEO PARAM  for special harmonics 
+            n_sh_coeff=36,  ## <--- GEO PARAM  for special harmonics !!  REMOVED: #n_coeff=36,  ## <--- GEO PARAM for LocalDCTConvs
             conv_start_size=64, ## <--- embed arch param
             siren_hidden=128, ## <--- embed arch param
             patch_size=16,
@@ -652,9 +651,7 @@ class VitGINR(nn.Module):
             oro_path=None):
         super().__init__()
         H, W = img_size
-        #n_basis = int(math.sqrt(n_coeff))
-        #self.freqconv = LocalDCTConv(n=n_basis, k=8, in_channels=in_channels*history)
-        self.basis = spherical_harmonic_basis(H, W, int(n_sh_coeff**0.5)) #.view(n_sh_coeff, H, W)
+        self.basis = spherical_harmonic_basis(H, W, int(n_sh_coeff**0.5)) #.view(n_sh_coeff, H, W) !!! REMOVED: #n_basis = int(math.sqrt(n_coeff)), #self.freqconv = LocalDCTConv(n=n_basis, k=8, in_channels=in_channels*history)
         self.encoder = GeoINR(
             n_sh_coeff,
             self.basis,
@@ -667,7 +664,7 @@ class VitGINR(nn.Module):
         )
         self.mapper_vit = VisionTransformer(
             img_size=img_size,
-            in_channels=n_coeff,
+            in_channels=n_sh_coeff,
             out_channels=out_channels,
             history=history,
             patch_size=patch_size,
@@ -686,11 +683,11 @@ class VitGINR(nn.Module):
         I_last = I[:, -1, :, :] #.unsqueeze(1) # new
         #print(f'I_last.shape: {I_last.shape}') #torch.Size([16, 1, 534, 534])
         I = I.squeeze(2)
-        #print(f'I_freq.shape: {I_freq.shape}') #torch.Size([16, 3, 534, 534])
+        #print(f'I.shape after squeze(2): {I.shape}') #torch.Size([16, 3, 534, 534])
         I_enc = self.encoder(I) # [B, n^2, H, W]
-        #print(f'I_freq.shape: after encoder {I_freq.shape}')
+        #print(f'I_enc.shape: after encoder {I_enc.shape}')
         I_prime = self.mapper_vit(I_enc)
         #print(f'I_prime.shape: after mapping {I_prime.shape}')
         I = I_prime + I_last # new
-        #print(f'I.shape: after mapping {I.shape}')
+        #print(f'I.shape: after mapping (at the end) {I.shape}')
         return I 
