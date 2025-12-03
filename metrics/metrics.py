@@ -6,10 +6,12 @@ from .utils import MetricsMetaInfo, register, register_lagg, LAGG_REGISTRY
 from .functional import *
 
 # Third party
+import os
 import numpy as np
 import torch
+from functools import partial
 
-from ..models.hub.sidm import dH_to_dT_conv
+from ..models.hub.sidm import dH_to_dT_conv, dH_to_dT_conv_PE
 
 
 class Metric:
@@ -366,19 +368,45 @@ oro = np.load(oro_path)["orography"]
 oro = np.squeeze(oro).astype(np.float32)
 H = torch.tensor(oro).to("cuda")  # shape (1,534, 534)
 
-#load model: dH_to_dT_conv as dH_to_dT_conv_MODEL (Static) –––––––––––––––––––
-modelpath= "outputs/SIDM_models/SIDM_convolution_based/dH_to_dT_conv.pt"
-DH_TO_DT_CONV = dH_to_dT_conv().cuda()
-checkpoint = torch.load(modelpath)
-DH_TO_DT_CONV.load_state_dict(checkpoint)
-DH_TO_DT_CONV.eval()
+class DH_TO_DT_CONV_LOADER: 
+    def __init__(self, model_spec: Literal["conv","conv_PE"]):
+        self.spec = model_spec
+        self.path = "outputs/SIDM_models/SIDM_convolution_based/dH_to_dT_"+model_spec+".pt"
+        self.model = False
+
+    def _load_model(self):
+        ## Model 
+        if self.spec == "conv":
+            self.model = dH_to_dT_conv()
+        elif self.spec == "conv_PE":
+            self.model = dH_to_dT_conv_PE()
+        else:
+            raise ValueError(f"Unknown model spec: {self.spec}")
+        self.model.cuda()
+        if not os.path.exists(self.path):
+            raise FileNotFoundError(f"Model weights not found at {self.path}. Please train the model first.")
+        checkpoint = torch.load(self.path)
+        self.model.load_state_dict(checkpoint)
+        self.model.eval()
+        param_count = sum(p.numel() for p in self.model.parameters())
+        print(f"[LAGG]: Total number of parameters: {param_count / 1e3:.1f}K")
+
+    def __call__(self, dH):
+        if not self.model:
+            self._load_model()
+        return self.model(dH)
+
+DH_TO_DT_CONV = {
+    "conv": DH_TO_DT_CONV_LOADER("conv"),
+    "conv_PE": DH_TO_DT_CONV_LOADER("conv_PE")
+}
 
 def SIDM_empirical_linear(dH):
     """Linear expected topological change"""
     return 0.0005816 * dH + 0.01518
 
-def SIDM_learned_conv(dH):
-    return(DH_TO_DT_CONV(dH))
+def SIDM_learned_conv(dH, model_spec: Literal["conv", "conv_PE"]="conv"):
+    return(DH_TO_DT_CONV[model_spec](dH))
 
 def DISA_abs_horizontal_vertical_differences(M, output: Literal["tuple", "flat", "concat"]= "tuple",soft = False):
     """Compute horizontal and vertical absolute differences of map M.
@@ -444,9 +472,8 @@ def LAGG_empirical_linear(T):
     dH = DISA_abs_horizontal_vertical_differences(H_batch, output="flat",soft=False).cuda()
 
     return mse(dT, SIDM_empirical_linear(dH), lat_weights=_w(dH),aggregate_only=True) 
-   
-@register_lagg("conv")
-def LAGG_conv(T): 
+
+def LAGG_conv(T, model_spec: Literal["conv", "conv_PE"]="conv"): 
     """
     T: predictions, shape (B, H, W)
 
@@ -462,7 +489,10 @@ def LAGG_conv(T):
     dH_stack = DISA_abs_horizontal_vertical_differences(H_batch, output="concat",soft=False).cuda()
     dT_stack = DISA_abs_horizontal_vertical_differences(T, output="concat",soft=True).cuda()
 
-    return  mse(dT_stack, SIDM_learned_conv(dH_stack), aggregate_only=True)
+    return  mse(dT_stack, SIDM_learned_conv(dH_stack, model_spec=model_spec), aggregate_only=True)
+
+for name in DH_TO_DT_CONV.keys():
+    register_lagg(name)(partial(LAGG_conv, model_spec=name))
 
 @register("mse_oro")
 class MSE_ORO(Metric):
