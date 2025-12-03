@@ -8,14 +8,12 @@ class dH_to_dT_conv(nn.Module):
     """ 
     learn cat(dT/dx, dT/dy) from cat(dH/dx, dH/dy) using simple conv net
     """
-    def __init__(self, in_channels=2, out_channels=2, conv_start_size=16):
+    def __init__(self, in_channels=2, out_channels=2):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Conv2d(in_channels, conv_start_size, kernel_size=3, padding=1),  # local receptive field
+            nn.Conv2d(in_channels, 16, kernel_size=3, padding=1),  # local receptive field
             nn.ReLU(),
-            #nn.Conv2d(conv_start_size, 2*conv_start_size, kernel_size=3, padding=1),  # hidden layer
-            #nn.ReLU(),
-            nn.Conv2d(conv_start_size, out_channels, kernel_size=3, padding=1)  # outputs 2 channels
+            nn.Conv2d(16, out_channels, kernel_size=3, padding=1)  # outputs 2 channels
         )
 
     def forward(self, x):
@@ -26,14 +24,14 @@ class dH_to_dT_conv_PE(nn.Module):
     learn cat(dT/dx, dT/dy) from cat(dH/dx, dH/dy) using simple conv net with Positional Encoding (GeoINR)
     """
     def __init__(self, 
-                img_size, 
+                img_size= (534,534), 
                 in_channels=2, 
                 out_channels=2,
                 n_sh_coeff = 36,
-                conv_start_size=64, ## <--- embed arch param
+                conv_start_size=32, ## <--- embed arch param
                 conv_start_size_enc=64, ## <--- embed arch param
                 siren_hidden=128, ## <--- embed arch param
-                oro_path=None,
+                oro_path="dataset/CERRA-534/orography.npz",
         ):
         super().__init__()
         self.net = nn.Sequential(
