@@ -4,7 +4,7 @@ from torch import nn
 import numpy as np
 from scipy.special import sph_harm
 import torch.nn.functional as F
-from cnn_blocks import PeriodicConv2D
+from .cnn_blocks import PeriodicConv2D
 
 def generate_local_dct_kernels(n: int, k: int) -> torch.Tensor:
     """
@@ -203,7 +203,6 @@ class GeoINR(nn.Module):
 
     def forward(self, A):  # [B, n, H, W] (FAR) or [B, C, H, W] (noFar)
         B, _, H, W = A.size() 
-        C = self.in_channels
         loc_basis = self.basis.view(-1, self.n_sh_coeff, H, W) # [1, 64, H, W]
         # Orography ––––––––––––––––––––––––––––––––
         oro = self.oro.view(-1, H, W)  # [B, H, W]
@@ -217,15 +216,20 @@ class GeoINR(nn.Module):
         grad_y = torch.cat([dy, last_row], dim=-2)  # [B, 1, H, W]
         oro_feat = torch.cat([oro, grad_x, grad_y], dim=1)  # [B, 3, H, W]
         # Encode orography features ––––––––––––––––––––––––––––––––
-        oro_basis = self.oro_encoder(oro_feat)  # [B, n_sh, H, W]
+        oro_basis = self.oro_encoder(oro_feat)  # [1, n_sh, H, W]
         geo_basis = loc_basis + oro_basis # [1, n_sh, H, W]
-        geo_basis = self.siren(geo_basis.permute(0,2,3,1))#.view(self.n_sh_coeff, H, W)
-        geo_basis = geo_basis.permute(0, 3, 1, 2) # [B, n_sh, H, W]
+        geo_basis = self.siren(geo_basis.permute(0,2,3,1)).permute(0, 3, 1, 2) # [1, n_sh, H, W]       
         ## ––––––––––––––––––––––––––––––––
-        if self.far: ## have multiple channels form Far need to stack the geobasis
-            geo_basis = geo_basis.repeat(1, C, 1, 1)
-        else: 
+        if self.far: ## have multiple channels form Far need to stack the geobasis 
+            #print(f"[FAR]: geo_basis shape before restack: {geo_basis.shape}") # [1, n_sh , H, W]
+            geo_basis = geo_basis.repeat(1, self.in_channels, 1, 1)
+            #print(f"[FAR]: geo_basis.shape:{geo_basis.shape} ") # after restack: [1, n_sh * in_channels, H, W]
+            #print(f"[FAR]: A.shape: {A.shape} ") #A is [B,108, H, W]
+        else:
+            #print(f"[INR]: geo_basis shape:  {geo_basis.shape}") #geo_basis is [1, n_sh , H, W]
+            #print(f"[INR]: dim A before projection; {A.shape}") #A: [B, 3, H, W] 
             A = self.projection_A(A)  # project input A to n_sh_coeff channels
+            # print(f"[INR]: dim A after projection; {A.shape}") #A: [B, n_sh_coeff, H, W]
         fused = geo_basis * A  +  geo_basis
         fused = self.projection(fused)
         out = self.conv(fused)
