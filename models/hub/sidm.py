@@ -27,19 +27,19 @@ class dH_to_dT_conv_PE(nn.Module):
                 img_size= (534,534), 
                 in_channels=2, 
                 out_channels=2,
-                n_sh_coeff = 36,
-                conv_start_size=32, ## <--- embed arch param
-                conv_start_size_enc=64, ## <--- embed arch param
-                siren_hidden=128, ## <--- embed arch param
+                n_sh_coeff = 16, ## square of int
+                conv_start_size=16, ## <--- embed arch param
+                conv_start_size_enc=8, ## <--- embed arch param
+                siren_hidden=16, ## <--- embed arch param
                 oro_path="dataset/CERRA-534/orography.npz",
         ):
         super().__init__()
         self.net = nn.Sequential(
             nn.Conv2d(n_sh_coeff, conv_start_size, kernel_size=3, padding=1),  # local receptive field -> now gets n_sh_coeff channels form the encoding. 
-            nn.ReLU(),
-            nn.Conv2d(conv_start_size, 2*conv_start_size, kernel_size=3, padding=1),  # hidden layer
-            nn.ReLU(),
-            nn.Conv2d(2*conv_start_size, out_channels, kernel_size=3, padding=1)  # outputs 2 channels
+            nn.Tanh(),
+            nn.Conv2d(conv_start_size, out_channels, kernel_size=3, padding=1),  # hidden layer
+            #nn.Tanh(),
+            #nn.Conv2d(2*conv_start_size, out_channels, kernel_size=3, padding=1)  # outputs 2 channels
         )
 
 
