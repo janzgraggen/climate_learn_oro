@@ -1,16 +1,66 @@
 import torch.nn as nn
+from .components.vit_oro import (
+    spherical_harmonic_basis,
+    GeoINR
+)
 
 class dH_to_dT_conv(nn.Module):
-    def __init__(self, in_channels=2, out_channels=2):
+    """ 
+    learn cat(dT/dx, dT/dy) from cat(dH/dx, dH/dy) using simple conv net
+    """
+    def __init__(self, in_channels=2, out_channels=2, conv_start_size=32):
         super().__init__()
         self.net = nn.Sequential(
-            nn.Conv2d(in_channels, 16, kernel_size=3, padding=1),  # local receptive field
+            nn.Conv2d(in_channels, conv_start_size, kernel_size=3, padding=1),  # local receptive field
             nn.ReLU(),
-            nn.Conv2d(16, out_channels, kernel_size=3, padding=1)  # outputs 2 channels
+            nn.Conv2d(conv_start_size, 2*conv_start_size, kernel_size=3, padding=1),  # hidden layer
+            nn.ReLU(),
+            nn.Conv2d(2*conv_start_size, out_channels, kernel_size=3, padding=1)  # outputs 2 channels
         )
 
     def forward(self, x):
         return self.net(x)
+    
+class dH_to_dT_conv_PE(nn.Module):
+    """ 
+    learn cat(dT/dx, dT/dy) from cat(dH/dx, dH/dy) using simple conv net with Positional Encoding (GeoINR)
+    """
+    def __init__(self, 
+                img_size, 
+                in_channels=2, 
+                out_channels=2,
+                n_sh_coeff = 36,
+                conv_start_size=32, ## <--- embed arch param
+                conv_start_size_enc=64, ## <--- embed arch param
+                siren_hidden=128, ## <--- embed arch param
+                oro_path=None,
+        ):
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(in_channels, conv_start_size, kernel_size=3, padding=1),  # local receptive field
+            nn.ReLU(),
+            nn.Conv2d(conv_start_size, 2*conv_start_size, kernel_size=3, padding=1),  # hidden layer
+            nn.ReLU(),
+            nn.Conv2d(2*conv_start_size, out_channels, kernel_size=3, padding=1)  # outputs 2 channels
+        )
+
+
+        H, W = img_size
+        self.basis = spherical_harmonic_basis(H, W, int(n_sh_coeff**0.5)) #.view(n_sh_coeff, H, W)
+        self.encoder = GeoINR(
+            n_sh_coeff,
+            self.basis,
+            oro_path=oro_path,
+            in_channels=in_channels,
+            siren_hidden=siren_hidden,
+            conv_start_size=conv_start_size_enc,
+            slim=True,
+            far=False
+        )
+
+    def forward(self, x):
+        x_enc = self.encoder(x)
+        return self.net(x_enc)
     
 
 # class dH_to_dT_conv_PositionalEncodingPretrained(nn.Module):
@@ -28,20 +78,7 @@ class dH_to_dT_conv(nn.Module):
 #         return self.net(x)
     
 
-# class dH_to_dT_conv_PositionalEncodingJointTrained(nn.Module):
 
-
-#     def __init__(self, in_channels=2, out_channels=2):
-#         super().__init__()
-#         self.net = nn.Sequential(
-#             nn.Conv2d(in_channels, 16, kernel_size=3, padding=1),  # local receptive field
-#             nn.ReLU(),
-#             nn.Conv2d(16, out_channels, kernel_size=3, padding=1)  # outputs 2 channels
-#         )
-
-#     def forward(self, x):
-#         return self.net(x)
-    
     
 
 
