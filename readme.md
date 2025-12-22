@@ -1,4 +1,4 @@
-# Orography Extention to Climatelearn 
+# Orography Extention to Climate_learn 
 
 Developped for Jan Zgraggen's Semester Project at the ECEO Lab @Epfl : [CerrOroCast](https://github.com/janzgraggen/CerrOroCast)
 
