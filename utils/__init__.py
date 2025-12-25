@@ -1,10 +1,15 @@
 from .visualize import (
+    visualize_sphere_at_index_save,
+    visualize_pixelwise_mean_abs_bias,
+)
+
+from .visualize_legacy import (
     visualize_at_index,
     visualize_mean_bias,
     visualize_sample,
     rank_histogram,
-    visualize_sphere_at_index_save,
 )
+
 from .loaders import (
     load_model_module,
     load_forecasting_module,
