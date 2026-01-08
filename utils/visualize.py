@@ -332,6 +332,7 @@ def visualize_pixelwise_mean_abs_bias(
     indices=None,
     src="cerra",
     save_data_path=None,
+    modelname="",
 ):
     mean_abs_bias = compute_pixelwise_mean_abs_bias(
         mm=mm,
@@ -351,7 +352,7 @@ def visualize_pixelwise_mean_abs_bias(
         land_mask=land_mask,
         extent=extent,
         index=0,
-        title=f"Pixelwise Mean Absolute Bias: {variable}",
+        title=f"{modelname}: MAB(x,y) ({variable})",
         content="bias",   # reuse bias colormap
         abs_bias=True,
     )
