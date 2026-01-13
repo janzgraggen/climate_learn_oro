@@ -11,7 +11,7 @@ import numpy as np
 import torch
 from functools import partial
 
-from ..models.hub.sidm import dH_to_dT_conv, dH_to_dT_conv_PE
+from ..models.hub.domain_mapping import dH_to_dT_conv, H_to_dT_conv_PE
 
 
 class Metric:
@@ -379,7 +379,7 @@ class DH_TO_DT_CONV_LOADER:
         if self.spec == "conv":
             self.model = dH_to_dT_conv()
         elif self.spec == "conv_PE":
-            self.model = dH_to_dT_conv_PE()
+            self.model = H_to_dT_conv_PE()
         else:
             raise ValueError(f"Unknown model spec: {self.spec}")
         self.model.cuda()
@@ -401,14 +401,14 @@ DH_TO_DT_CONV = {
     "conv_PE": DH_TO_DT_CONV_LOADER("conv_PE")
 }
 
-def SIDM_empirical_linear(dH):
+def DM_empirical_linear(dH):
     """Linear expected topological change"""
     return 0.0005816 * dH + 0.01518
 
-def SIDM_learned_conv(dH, model_spec: Literal["conv", "conv_PE"]="conv"):
+def DM_learned_conv(dH, model_spec: Literal["conv", "conv_PE"]="conv"):
     return(DH_TO_DT_CONV[model_spec](dH))
 
-def DISA_abs_horizontal_vertical_differences(M, output: Literal["tuple", "flat", "concat"]= "tuple",soft = False):
+def SO_abs_horizontal_vertical_differences(M, output: Literal["tuple", "flat", "concat"]= "tuple",soft = False):
     """Compute horizontal and vertical absolute differences of map M.
     input:
         M: shape (B, H, W)
@@ -468,10 +468,10 @@ def LAGG_empirical_linear(T):
     H_batch = H.unsqueeze(0).expand(B, -1, -1)  # (B, H, W)
 
     # Horizontal and vertical differences
-    dT = DISA_abs_horizontal_vertical_differences(T, output="flat",soft=True).cuda()
-    dH = DISA_abs_horizontal_vertical_differences(H_batch, output="flat",soft=False).cuda()
+    dT = SO_abs_horizontal_vertical_differences(T, output="flat",soft=True).cuda()
+    dH = SO_abs_horizontal_vertical_differences(H_batch, output="flat",soft=False).cuda()
 
-    return mse(dT, SIDM_empirical_linear(dH), lat_weights=_w(dH),aggregate_only=True) 
+    return mse(dT, DM_empirical_linear(dH), lat_weights=_w(dH),aggregate_only=True) 
 
 def LAGG_conv(T, model_spec: Literal["conv", "conv_PE"]="conv"): 
     """
@@ -486,10 +486,13 @@ def LAGG_conv(T, model_spec: Literal["conv", "conv_PE"]="conv"):
     B, _, _ = T.shape
     H_batch = H.unsqueeze(0).expand(B, -1, -1)  # (B, H, W)
     
-    dH_stack = DISA_abs_horizontal_vertical_differences(H_batch, output="concat",soft=False).cuda()
-    dT_stack = DISA_abs_horizontal_vertical_differences(T, output="concat",soft=True).cuda()
+    if model_spec == "conv":
+        dH_stack = SO_abs_horizontal_vertical_differences(H_batch, output="concat",soft=False).cuda()
+    elif model_spec == "conv_PE": # H derrivatives naturally computed in the GeoINR positional encoding)
+        dH_stack = H_batch.unsqueeze(1).float().cuda()  # shape (B,1,H,W)
+    dT_stack = SO_abs_horizontal_vertical_differences(T, output="concat",soft=True).cuda()
+    return  mse(dT_stack, DM_learned_conv(dH_stack, model_spec=model_spec), aggregate_only=True)
 
-    return  mse(dT_stack, SIDM_learned_conv(dH_stack, model_spec=model_spec), aggregate_only=True)
 
 for name in DH_TO_DT_CONV.keys():
     register_lagg(name)(partial(LAGG_conv, model_spec=name))

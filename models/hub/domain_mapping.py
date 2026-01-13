@@ -19,13 +19,16 @@ class dH_to_dT_conv(nn.Module):
     def forward(self, x):
         return self.net(x)
     
-class dH_to_dT_conv_PE(nn.Module):
+class H_to_dT_conv_PE(nn.Module):
     """ 
-    learn cat(dT/dx, dT/dy) from cat(dH/dx, dH/dy) using simple conv net with Positional Encoding (GeoINR)
+    Learn cat(dT/dx, dT/dy) from H using GeoINR positional encoding + simple conv net
+    INFO: Set in_channels=2 to
+          learn cat(dT/dx, dT/dy) from cat(dH/dx, dH/dy) using simple conv net with Positional Encoding (GeoINR)
+          !!! the Terrain vector in INR will compute second order derivs.. )
     """
     def __init__(self, 
                 img_size= (534,534), 
-                in_channels=2, 
+                in_channels=1, 
                 out_channels=2,
                 n_sh_coeff = 16, ## square of int
                 conv_start_size=16, ## <--- embed arch param
