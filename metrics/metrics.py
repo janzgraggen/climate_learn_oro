@@ -371,7 +371,7 @@ H = torch.tensor(oro).to("cuda")  # shape (1,534, 534)
 class DH_TO_DT_CONV_LOADER: 
     def __init__(self, model_spec: Literal["conv","conv_PE"]):
         self.spec = model_spec
-        self.path = "outputs/SIDM_models/SIDM_convolution_based/dH_to_dT_"+model_spec+".pt"
+        self.path = "climate_learn_oro/metrics/eecr_models/dH_to_dT_"+model_spec+".pt" #or location of cl (climate_learn_oro) package
         self.model = False
 
     def _load_model(self):
@@ -473,7 +473,7 @@ def LAGG_empirical_linear(T):
 
     return mse(dT, DM_empirical_linear(dH), lat_weights=_w(dH),aggregate_only=True) 
 
-def LAGG_conv(T, model_spec: Literal["conv", "conv_PE"]="conv"): 
+def LAGG_conv(T, model_spec: Literal["conv", "conv_PE"]="conv",metric_gate_weights: Optional[torch.nn.Parameter]=None): 
     """
     T: predictions, shape (B, H, W)
 
@@ -491,7 +491,7 @@ def LAGG_conv(T, model_spec: Literal["conv", "conv_PE"]="conv"):
     elif model_spec == "conv_PE": # H derrivatives naturally computed in the GeoINR positional encoding)
         dH_stack = H_batch.unsqueeze(1).float().cuda()  # shape (B,1,H,W)
     dT_stack = SO_abs_horizontal_vertical_differences(T, output="concat",soft=True).cuda()
-    return  mse(dT_stack, DM_learned_conv(dH_stack, model_spec=model_spec), aggregate_only=True)
+    return  mse(dT_stack, DM_learned_conv(dH_stack, model_spec=model_spec), aggregate_only=True,lat_weights=metric_gate_weights)
 
 
 for name in DH_TO_DT_CONV.keys():
